@@ -1,0 +1,59 @@
+diff --git a/src/utils.py b/src/utils.py
+index 207ff58..1eebb3f 100644
+--- a/src/utils.py
++++ b/src/utils.py
+@@ -836,6 +836,8 @@ def _assisted_decoding(
+     model_kwargs = self._get_initial_cache_position(input_ids, model_kwargs)
+     accepted_tokens = 0
+     candidates_tokens = 0
++    round_trace = []
++    round_index = 0
+     this_peer_finished = False
+     is_first_iteration = True  # to preserve the same API in the output as other generation methods
+     import time
+@@ -862,6 +864,7 @@ def _assisted_decoding(
+         # if prefill_time == 0:
+         #     prefill_time = gap1
+         # start_time = time.time()
++        requested_k = int(candidate_generator.num_assistant_tokens)
+         candidate_input_ids, candidate_logits = candidate_generator.get_candidates(input_ids, assistant_input_ids, is_first_iteration)
+         #  1. Fetch candidate sequences from a `CandidateGenerator`
+         # Mark: Modify Here
+@@ -952,6 +955,27 @@ def _assisted_decoding(
+                 n_matches -= 1
+             valid_tokens = selected_tokens[:, : n_matches + 1]
+         # print("Current iteration matches: ", n_matches)
++        round_index += 1
++
++        n_matches_int = (
++            int(n_matches.item())
++            if isinstance(n_matches, torch.Tensor)
++            else int(n_matches)
++        )
++
++        round_trace.append(
++            {
++                "round": round_index,
++                "requested_k": requested_k,
++                "drafted_tokens": int(candidate_length),
++                "accepted_draft_tokens": n_matches_int,
++                "acceptance_rate": (
++                    n_matches_int / int(candidate_length)
++                    if candidate_length > 0
++                    else None
++                ),
++            }
++        )
+         accepted_tokens += n_matches
+         # 4. Update variables according to the number of matching assistant tokens. Remember: the token generated
+         # by the model after the last candidate match is also valid, as it is generated from a correct sequence.
+@@ -1064,7 +1088,8 @@ def _assisted_decoding(
+         return_dict = {
+             "accept_tokens": accepted_tokens,
+             "decoding_time": decoding_end_time - decoding_start_time,
+-            "candidates_tokens": candidates_tokens
++            "candidates_tokens": candidates_tokens,
++            "round_trace": round_trace,
+         }
+         if output_latency:
+             return input_ids, return_dict
