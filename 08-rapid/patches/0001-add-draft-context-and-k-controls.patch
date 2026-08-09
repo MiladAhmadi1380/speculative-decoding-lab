@@ -1,0 +1,94 @@
+diff --git a/eval/pred_longbench.py b/eval/pred_longbench.py
+index 212b266..ef45f76 100644
+--- a/eval/pred_longbench.py
++++ b/eval/pred_longbench.py
+@@ -126,6 +126,16 @@ def query_llm(
+                 num_assistant_tokens=num_assistant_tokens,
+                 spec_alpha=alpha
+             )
++            latency["target_prompt_tokens"] = input_ids.shape[1]
++            latency["assistant_prompt_tokens"] = assistant_input_ids.shape[1]
++            latency["num_assistant_tokens"] = num_assistant_tokens
++
++            if latency["candidates_tokens"] > 0:
++                latency["acceptance_rate"] = (
++                    latency["accept_tokens"] / latency["candidates_tokens"]
++                )
++            else:
++                latency["acceptance_rate"] = None
+             # accepted_tokens = latency['accept_tokens'].item()
+             # accepted_tokens = accepted_tokens.item()
+         else:
+@@ -203,11 +213,29 @@ def get_pred(
+         
+         len_prompt = len(tokenizer.encode(prompt))
+         len_prompt = len_prompt if len_prompt < max_len else max_len
+-        num_to_retrieve = len_prompt / (args.max_chunk_len * args.num_to_shorten)
+-        minimum_chunks = min(args.minimum_rag_len / args.max_chunk_len, len_prompt / args.max_chunk_len)
++
+         import math
+-        num_to_retrieve = math.ceil(max(num_to_retrieve, minimum_chunks))
+-        print(f"Number of Chunks to Retrieve: {num_to_retrieve}")
++
++        if args.draft_context_budget is not None:
++            num_to_retrieve = math.ceil(
++                args.draft_context_budget / args.max_chunk_len
++            )
++        else:
++            num_to_retrieve = len_prompt / (
++                args.max_chunk_len * args.num_to_shorten
++            )
++            minimum_chunks = min(
++                args.minimum_rag_len / args.max_chunk_len,
++                len_prompt / args.max_chunk_len
++            )
++            num_to_retrieve = math.ceil(
++                max(num_to_retrieve, minimum_chunks)
++            )
++
++        print(
++            f"Draft context budget: {args.draft_context_budget}, "
++            f"chunks requested: {num_to_retrieve}"
++        )
+         rag_prompt = ""
+         # if args.do_speculative:
+         query = prompt.split("</text>")[-1].strip().split("\n\n")[0]
+@@ -221,6 +249,10 @@ def get_pred(
+             tokenizer=tokenizer,
+             rag_threshold=args.rag_threshold,
+         )
++        retrieved_context_tokens = len(
++            tokenizer.encode(rag_context, add_special_tokens=False)
++        )
++
+         rag_template = template.replace("Please read the following text", "Please read the following retrieved text chunks")
+         rag_prompt = rag_template.replace("$DOC$", rag_context).replace("$Q$", item['question'].strip()).replace("$C_A$", item['choice_A'].strip()).replace("$C_B$", item['choice_B'].strip()).replace("$C_C$", item['choice_C'].strip()).replace("$C_D$", item['choice_D'].strip())
+ 
+@@ -276,9 +308,13 @@ def get_pred(
+         item['judge'] = item['pred'] == item['answer']
+         item['context'] = context[:1000]
+         item['rag_config'] = {
++            'requested_draft_context_budget': args.draft_context_budget,
++            'requested_num_rag_chunks': num_to_retrieve,
++            'retrieved_context_tokens': retrieved_context_tokens,
+             'max_chunk_len': args.max_chunk_len,
+             'num_rag_chunks': num_rag_chunks,
+-            'rag_threshold': args.rag_threshold
++            'rag_threshold': args.rag_threshold,
++            'num_assistant_tokens': args.num_assistant_tokens
+         }
+         item['latency'] = latency
+         fout.write(json.dumps(item, ensure_ascii=False) + '\n')
+@@ -340,6 +376,12 @@ if __name__ == "__main__":
+     parser.add_argument("--max_chunk_len", type=int, default=128)
+     parser.add_argument("--minimum_rag_len", type=int, default=4096)
+     parser.add_argument("--num_to_shorten", type=int, default=32)
++    parser.add_argument(
++        "--draft_context_budget",
++        type=int,
++        default=None,
++        help="Requested token budget for retrieved context given to the RAPID drafter."
++    )
+     parser.add_argument("--rag_threshold", type=float, default=0.1)
+     parser.add_argument("--assistant_confidence_threshold", type=float, default=0.1)
+     parser.add_argument("--alpha", type=float, default=0.1)
